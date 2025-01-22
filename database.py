@@ -15,9 +15,10 @@ class Database:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
-                # User streaks table with rewards tracking
+                # Drop and recreate user_streaks table with proper schema
+                cursor.execute('''DROP TABLE IF EXISTS user_streaks''')
                 cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS user_streaks (
+                    CREATE TABLE user_streaks (
                         user_id INTEGER PRIMARY KEY,
                         streak_count INTEGER DEFAULT 0,
                         highest_streak INTEGER DEFAULT 0,
@@ -26,9 +27,10 @@ class Database:
                     )
                 ''')
 
-                # User preferences table
+                # Drop and recreate user_preferences table with proper schema
+                cursor.execute('''DROP TABLE IF EXISTS user_preferences''')
                 cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS user_preferences (
+                    CREATE TABLE user_preferences (
                         user_id INTEGER PRIMARY KEY,
                         default_persona TEXT,
                         custom_settings TEXT DEFAULT '{}',
@@ -38,6 +40,7 @@ class Database:
                 ''')
 
                 conn.commit()
+                logger.info("Database tables created successfully")
         except Exception as e:
             logger.error(f"Database initialization failed: {e}")
             raise
@@ -56,10 +59,9 @@ class Database:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
-                # Get current time for streak calculation
                 current_time = datetime.now()
 
-                # Get user's last activity
+                # Get user's current streak info
                 cursor.execute('''
                     SELECT streak_count, last_use, highest_streak, unlocked_rewards 
                     FROM user_streaks 
@@ -68,10 +70,11 @@ class Database:
                 result = cursor.fetchone()
 
                 new_streak = 1
+                highest_streak = 1
                 unlocked_rewards = []
 
                 if result:
-                    streak_count, last_use, highest_streak, rewards_json = result
+                    streak_count, last_use, current_highest, rewards_json = result
                     last_use = datetime.strptime(last_use, '%Y-%m-%d %H:%M:%S.%f')
                     time_diff = current_time - last_use
                     unlocked_rewards = json.loads(rewards_json)
@@ -79,35 +82,33 @@ class Database:
                     # If last use was within 24 hours, increment streak
                     if time_diff <= timedelta(hours=24):
                         new_streak = streak_count + 1
-
-                        # Update highest streak if current is higher
-                        if new_streak > highest_streak:
-                            highest_streak = new_streak
+                        highest_streak = max(new_streak, current_highest)
 
                         # Check for new rewards
                         new_rewards = self._check_rewards(new_streak, unlocked_rewards)
                         if new_rewards:
                             unlocked_rewards.extend(new_rewards)
+                    else:
+                        highest_streak = current_highest or 1
 
-                # Update or insert user streak
+                # Update streak in database
                 cursor.execute('''
                     INSERT INTO user_streaks (
                         user_id, streak_count, highest_streak, last_use, unlocked_rewards
                     ) VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET 
-                    streak_count = ?,
-                    highest_streak = ?,
-                    last_use = ?,
-                    unlocked_rewards = ?
+                        streak_count = excluded.streak_count,
+                        highest_streak = excluded.highest_streak,
+                        last_use = excluded.last_use,
+                        unlocked_rewards = excluded.unlocked_rewards
                 ''', (
-                    user_id, new_streak, highest_streak, current_time, 
-                    json.dumps(unlocked_rewards),
-                    new_streak, highest_streak, current_time,
+                    user_id, new_streak, highest_streak, current_time,
                     json.dumps(unlocked_rewards)
                 ))
                 conn.commit()
 
                 return new_streak, highest_streak, unlocked_rewards
+
         except Exception as e:
             logger.error(f"Error updating user streak: {e}")
             return 0, 0, []
@@ -141,10 +142,12 @@ class Database:
                     WHERE user_id = ?
                 ''', (user_id,))
                 result = cursor.fetchone()
+
                 if result:
                     streak, highest, rewards = result
                     return streak, highest, json.loads(rewards)
                 return 0, 0, []
+
         except Exception as e:
             logger.error(f"Error getting user streak: {e}")
             return 0, 0, []
@@ -159,20 +162,22 @@ class Database:
                 if custom_settings is None:
                     custom_settings = {}
 
+                # Use parameterized query to prevent SQL injection
                 cursor.execute('''
                     INSERT INTO user_preferences (
                         user_id, default_persona, custom_settings, updated_at
                     ) VALUES (?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
-                    default_persona = COALESCE(?, default_persona),
-                    custom_settings = ?,
-                    updated_at = ?
+                        default_persona = COALESCE(?, default_persona),
+                        custom_settings = ?,
+                        updated_at = ?
                 ''', (
                     user_id, default_persona, json.dumps(custom_settings), current_time,
                     default_persona, json.dumps(custom_settings), current_time
                 ))
                 conn.commit()
                 return True
+
         except Exception as e:
             logger.error(f"Error saving user preferences: {e}")
             return False
@@ -188,10 +193,12 @@ class Database:
                     WHERE user_id = ?
                 ''', (user_id,))
                 result = cursor.fetchone()
+
                 if result:
                     persona, settings = result
                     return persona, json.loads(settings)
                 return None, {}
+
         except Exception as e:
             logger.error(f"Error getting user preferences: {e}")
             return None, {}

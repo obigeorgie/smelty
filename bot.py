@@ -159,7 +159,7 @@ async def smelty(interaction, question: str, mode: str = None):
         persona = get_persona(mode, unlocked_rewards)
         if not persona:
             available_modes = (
-                list(PERSONAS.keys()) + 
+                list(PERSONAS.keys()) +
                 [r for r in unlocked_rewards if r in REWARD_PERSONAS]
             )
             modes_str = ", ".join(f"`{m}`" for m in available_modes)
