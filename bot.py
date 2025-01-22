@@ -65,51 +65,110 @@ async def help_command(interaction):
 )
 @app_commands.describe(
     default_mode="Your preferred personality mode",
+    response_style="How responses should be formatted (normal/fancy/minimal)",
+    mention_style="How you want to be mentioned (username/nickname/none)",
+    streak_display="Show streak info after responses (on/off)"
 )
-async def preferences(interaction, default_mode: str = None):
+async def preferences(
+    interaction, 
+    default_mode: str = None,
+    response_style: str = None,
+    mention_style: str = None,
+    streak_display: str = None
+):
     """Set user preferences."""
     try:
-        if default_mode:
-            # Verify the mode exists and user has access
-            streak, _, unlocked_rewards = db.get_user_streak(interaction.user.id)
+        # Get current preferences
+        default_persona, custom_settings = db.get_user_preferences(interaction.user.id)
+        custom_settings = custom_settings or {}
 
-            if default_mode in REWARD_PERSONAS and default_mode not in unlocked_rewards:
+        if any([default_mode, response_style, mention_style, streak_display]):
+            # Validate and update preferences
+            if default_mode:
+                # Verify the mode exists and user has access
+                streak, _, unlocked_rewards = db.get_user_streak(interaction.user.id)
+
+                if default_mode in REWARD_PERSONAS and default_mode not in unlocked_rewards:
+                    await interaction.response.send_message(
+                        f"❌ You haven't unlocked the {default_mode} mode yet!\n"
+                        f"Keep using the bot to unlock more personalities!"
+                    )
+                    return
+
+                if default_mode not in PERSONAS and default_mode not in REWARD_PERSONAS:
+                    available_modes = list(PERSONAS.keys()) + [r for r in unlocked_rewards if r in REWARD_PERSONAS]
+                    await interaction.response.send_message(
+                        f"❌ Invalid mode! Available modes: {', '.join(available_modes)}"
+                    )
+                    return
+
+            # Validate response style
+            if response_style and response_style not in ['normal', 'fancy', 'minimal']:
                 await interaction.response.send_message(
-                    f"❌ You haven't unlocked the {default_mode} mode yet!\n"
-                    f"Keep using the bot to unlock more personalities!"
+                    "❌ Invalid response style! Choose from: normal, fancy, minimal"
                 )
                 return
 
-            if default_mode not in PERSONAS and default_mode not in REWARD_PERSONAS:
-                available_modes = list(PERSONAS.keys()) + [r for r in unlocked_rewards if r in REWARD_PERSONAS]
+            # Validate mention style
+            if mention_style and mention_style not in ['username', 'nickname', 'none']:
                 await interaction.response.send_message(
-                    f"❌ Invalid mode! Available modes: {', '.join(available_modes)}"
+                    "❌ Invalid mention style! Choose from: username, nickname, none"
                 )
                 return
 
-            # Save preference
-            if db.save_user_preference(interaction.user.id, default_mode):
+            # Validate streak display
+            if streak_display and streak_display not in ['on', 'off']:
                 await interaction.response.send_message(
-                    f"✅ Your default mode has been set to: `{default_mode}`!\n"
-                    "This will be used when you don't specify a mode."
+                    "❌ Invalid streak display setting! Choose from: on, off"
                 )
+                return
+
+            # Update settings
+            custom_settings.update({
+                'response_style': response_style or custom_settings.get('response_style', 'normal'),
+                'mention_style': mention_style or custom_settings.get('mention_style', 'username'),
+                'streak_display': streak_display or custom_settings.get('streak_display', 'on')
+            })
+
+            # Save preferences
+            if db.save_user_preference(interaction.user.id, default_mode or default_persona, custom_settings):
+                # Build response message
+                response = ["✅ Your preferences have been updated!"]
+                if default_mode:
+                    response.append(f"• Default mode: `{default_mode}`")
+                if response_style:
+                    response.append(f"• Response style: `{response_style}`")
+                if mention_style:
+                    response.append(f"• Mention style: `{mention_style}`")
+                if streak_display:
+                    response.append(f"• Streak display: `{streak_display}`")
+
+                await interaction.response.send_message('\n'.join(response))
             else:
                 await interaction.response.send_message(
-                    "❌ Couldn't save your preference. Please try again later!"
+                    "❌ Couldn't save your preferences. Please try again later!"
                 )
         else:
             # Show current preferences
-            default_persona, custom_settings = db.get_user_preferences(interaction.user.id)
+            response = ["🎭 **Your Current Preferences**"]
+
             if default_persona:
-                await interaction.response.send_message(
-                    f"🎭 Your current default mode is: `{default_persona}`\n"
-                    "Use `/prefs default_mode:[mode]` to change it!"
-                )
-            else:
-                await interaction.response.send_message(
-                    "You haven't set any preferences yet!\n"
-                    "Use `/prefs default_mode:[mode]` to set your default personality."
-                )
+                response.append(f"• Default mode: `{default_persona}`")
+
+            response.append(f"• Response style: `{custom_settings.get('response_style', 'normal')}`")
+            response.append(f"• Mention style: `{custom_settings.get('mention_style', 'username')}`")
+            response.append(f"• Streak display: `{custom_settings.get('streak_display', 'on')}`")
+
+            response.extend([
+                "",
+                "**To change preferences, use:**",
+                "`/prefs default_mode:[mode]` - Set your default personality",
+                "`/prefs response_style:[normal/fancy/minimal]` - Change response formatting",
+                "`/prefs mention_style:[username/nickname/none]` - Change how you're mentioned",
+                "`/prefs streak_display:[on/off]` - Toggle streak info after responses"
+            ])
+
+            await interaction.response.send_message('\n'.join(response))
 
     except Exception as e:
         logger.error(f"Error handling preferences: {e}", exc_info=True)
@@ -129,14 +188,14 @@ async def smelty(interaction, question: str, mode: str = None):
     try:
         logger.info(f"Command received - User: {interaction.user.name} (ID: {interaction.user.id})")
 
+        # Get user preferences
+        default_mode, custom_settings = db.get_user_preferences(interaction.user.id)
+        custom_settings = custom_settings or {}
+
         # If no mode specified, use user's preferred mode
         if not mode:
-            default_mode, _ = db.get_user_preferences(interaction.user.id)
-            if default_mode:
-                mode = default_mode
-                logger.info(f"Using default mode {mode} for user {interaction.user.name}")
-            else:
-                mode = "cynical_vc"  # Fallback to default
+            mode = default_mode or "cynical_vc"  # Fallback to default
+            logger.info(f"Using default mode {mode} for user {interaction.user.name}")
 
         logger.info(f"Parameters - Mode: {mode}, Question: {question}")
 
@@ -151,9 +210,6 @@ async def smelty(interaction, question: str, mode: str = None):
         previous_streak = db.get_user_streak(interaction.user.id)[0]
         streak, highest_streak, unlocked_rewards = db.update_user_streak(interaction.user.id)
         logger.info(f"User streak updated - Previous: {previous_streak}, New: {streak}")
-
-        # Check for new rewards
-        new_rewards = [r for r in unlocked_rewards if r not in json.loads(db.get_user_streak(interaction.user.id)[2])]
 
         # Get appropriate persona based on mode and unlocked rewards
         persona = get_persona(mode, unlocked_rewards)
@@ -180,25 +236,44 @@ async def smelty(interaction, question: str, mode: str = None):
             response = call_llm(persona["prompt"], question)
             logger.info("Received LLM API response successfully")
 
-            # Format response with mode and streak info
-            formatted_response = f"**[{mode}]** {response}\n"
+            # Format response based on user preferences
+            response_style = custom_settings.get('response_style', 'normal')
+            mention_style = custom_settings.get('mention_style', 'username')
+            streak_display = custom_settings.get('streak_display', 'on')
 
-            # Add streak and reward information
-            streak_message = f"\n🎯 Current Streak: {streak}"
-            if highest_streak > streak:
-                streak_message += f" (Highest: {highest_streak})"
+            # Format user mention
+            user_mention = ""
+            if mention_style == 'username':
+                user_mention = f"@{interaction.user.name}"
+            elif mention_style == 'nickname':
+                user_mention = interaction.user.display_name
 
-            # Add new reward notifications
-            if new_rewards:
-                streak_message += "\n\n🎉 **New Rewards Unlocked!**"
-                for reward in new_rewards:
-                    streak_message += f"\n{get_unlock_message(reward)}"
-            elif streak >= 5:
-                next_tier = next((tier for tier in [5, 10, 25, 50, 100] if tier > streak), None)
-                if next_tier:
-                    streak_message += f"\n👀 Next reward at {next_tier} streak!"
+            # Format response based on style
+            if response_style == 'fancy':
+                formatted_response = f"```diff\n+ {mode.upper()} MODE\n```\n{user_mention}\n{response}"
+            elif response_style == 'minimal':
+                formatted_response = f"{response}"
+            else:  # normal
+                formatted_response = f"**[{mode}]** {user_mention}\n{response}"
 
-            formatted_response += streak_message
+            # Add streak information if enabled
+            if streak_display == 'on':
+                streak_message = f"\n🎯 Current Streak: {streak}"
+                if highest_streak > streak:
+                    streak_message += f" (Highest: {highest_streak})"
+
+                # Add new reward notifications
+                new_rewards = [r for r in unlocked_rewards if r not in json.loads(db.get_user_streak(interaction.user.id)[2])]
+                if new_rewards:
+                    streak_message += "\n\n🎉 **New Rewards Unlocked!**"
+                    for reward in new_rewards:
+                        streak_message += f"\n{get_unlock_message(reward)}"
+                elif streak >= 5:
+                    next_tier = next((tier for tier in [5, 10, 25, 50, 100] if tier > streak), None)
+                    if next_tier:
+                        streak_message += f"\n👀 Next reward at {next_tier} streak!"
+
+                formatted_response += streak_message
 
             await interaction.followup.send(formatted_response)
             logger.info(f"Response sent successfully to user {interaction.user.name}")
