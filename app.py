@@ -1,6 +1,7 @@
 import os
 from flask import Flask, render_template
 from config import DISCORD_TOKEN
+from personas import PERSONAS, REWARD_PERSONAS
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev_key_123")
@@ -12,7 +13,7 @@ def home():
         {
             "icon": "🎭",
             "title": "Multiple Personas",
-            "description": "Chat with different AI personalities - from a cynical VC to an excited teen!"
+            "description": "Chat with different AI personalities - from a cynical VC to a medieval knight!"
         },
         {
             "icon": "🏆",
@@ -30,25 +31,19 @@ def home():
             "description": "Built-in rate limiting to keep things running smoothly"
         }
     ]
-    
+
+    # Show first 6 base personas
+    persona_list = list(PERSONAS.items())[:6]
     personas = [
         {
-            "name": "Cynical VC",
-            "description": "Questions everything's scalability with a dash of startup jargon",
-            "example": "Oh sure, another 'revolutionary' idea that'll disrupt the market. What's your burn rate looking like? *adjusts Patagonia vest*"
-        },
-        {
-            "name": "TikTok Teen",
-            "description": "Super excited about everything with plenty of emojis",
-            "example": "OMG bestie! 🌟 That's literally 💫 the most amazing 🎯 thing ever!!!"
-        },
-        {
-            "name": "Conspiracy Theorist",
-            "description": "Connects everything to the Illuminati or UFOs",
-            "example": "Wake up sheeple! The Illuminati is clearly behind this. I have documents from Area 51 that PROVE it!"
+            "name": name.replace('_', ' ').title(),
+            "description": details["prompt"].split('\n')[0].strip(),
+            "example": details["example"]
         }
+        for name, details in persona_list
     ]
-    
+
+    # Show all reward tiers
     rewards = [
         {
             "unlock": "5 uses",
@@ -61,9 +56,19 @@ def home():
             "description": "The original chaotic personality"
         },
         {
+            "unlock": "15 uses",
+            "reward": "Poetry Master",
+            "description": "Responses flow like beautiful verses"
+        },
+        {
             "unlock": "25 uses",
             "reward": "Chaos Agent Mode",
             "description": "Pure randomness and surreal humor"
+        },
+        {
+            "unlock": "35 uses",
+            "reward": "Quantum Physicist",
+            "description": "Scientific and quantum-inspired responses"
         },
         {
             "unlock": "50 uses",
@@ -71,12 +76,17 @@ def home():
             "description": "Fancy formatting and theatrical responses"
         },
         {
+            "unlock": "75 uses",
+            "reward": "Shakespearean Dramatist",
+            "description": "Dramatic and theatrical responses"
+        },
+        {
             "unlock": "100 uses",
             "reward": "Legendary Mode",
             "description": "The ultimate AI personality"
         }
     ]
-    
+
     return render_template('index.html', 
                          features=features,
                          personas=personas,
