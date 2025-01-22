@@ -231,6 +231,35 @@ async def smelty(interaction, question: str, mode: str = None):
         else:
             await interaction.followup.send(error_response)
 
+@tree.command(name="invite", description="Get the bot's invite link!")
+async def invite_command(interaction):
+    """Provides the bot's invite link."""
+    try:
+        # Create invite link with minimal required permissions
+        permissions = discord.Permissions(
+            send_messages=True,
+            use_application_commands=True
+        )
+
+        invite_url = discord.utils.oauth_url(
+            client.user.id,
+            permissions=permissions,
+            scopes=["bot", "applications.commands"]
+        )
+
+        await interaction.response.send_message(
+            f"🎉 **Add me to your server!**\n"
+            f"Click here to invite me: {invite_url}\n\n"
+            f"*I only need basic permissions to send messages and use commands!*"
+        )
+        logger.info(f"Invite command used by {interaction.user.name}")
+    except Exception as e:
+        logger.error(f"Error generating invite link: {e}")
+        await interaction.response.send_message(
+            "❌ Oops! Something went wrong generating the invite link. "
+            "Please try again later!"
+        )
+
 @client.event
 async def on_ready():
     """Called when the bot is ready."""
